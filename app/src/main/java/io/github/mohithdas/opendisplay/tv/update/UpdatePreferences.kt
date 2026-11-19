@@ -22,6 +22,19 @@ class UpdatePreferences(context: Context) {
             if (value == null) remove(KEY_LAST_SUCCESS) else putLong(KEY_LAST_SUCCESS, value)
         }.apply()
 
+    /**
+     * Wall-clock time of the most recent attempt, successful or not. `lastSuccessfulCheckMillis`
+     * only advances on a 2xx response, so on a network where the GitHub API is filtered or
+     * unreachable — DNS poisoning and connection timeouts rather than a fast failure — a
+     * success-only throttle restarts the whole timeout chain on every launch. The attempt stamp is
+     * what keeps a cold start off the critical path.
+     */
+    var lastAttemptMillis: Long?
+        get() = preferences.getLong(KEY_LAST_ATTEMPT, -1L).takeIf { it >= 0L }
+        set(value) = preferences.edit().apply {
+            if (value == null) remove(KEY_LAST_ATTEMPT) else putLong(KEY_LAST_ATTEMPT, value)
+        }.apply()
+
     var skippedVersion: String?
         get() = preferences.getString(KEY_SKIPPED_VERSION, null)
         set(value) = preferences.edit().putString(KEY_SKIPPED_VERSION, value).apply()
@@ -98,6 +111,7 @@ class UpdatePreferences(context: Context) {
         const val KEY_AUTOMATIC_CHECK = "automatic_check"
         const val KEY_AUTO_DOWNLOAD = "auto_download_unmetered"
         const val KEY_LAST_SUCCESS = "last_success"
+        const val KEY_LAST_ATTEMPT = "last_attempt"
         const val KEY_SKIPPED_VERSION = "skipped_version"
         const val KEY_REMINDED_VERSION = "reminded_version"
         const val KEY_VERIFIED_VERSION = "verified_version"

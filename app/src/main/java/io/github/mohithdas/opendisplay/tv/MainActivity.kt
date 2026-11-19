@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.lifecycleScope
 import io.github.mohithdas.opendisplay.tv.net.PhoneReceiver
 import io.github.mohithdas.opendisplay.tv.service.ReceiverService
 import io.github.mohithdas.opendisplay.tv.settings.AwakePolicy
@@ -33,6 +34,8 @@ import io.github.mohithdas.opendisplay.tv.ui.ReceiverScreen
 import io.github.mohithdas.opendisplay.tv.ui.theme.OpenDisplayTheme
 import io.github.mohithdas.opendisplay.tv.update.UpdateManager
 import io.github.mohithdas.opendisplay.tv.util.Log
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** UI host for the foreground receiver service. Leaving with Back never stops the service. */
 class MainActivity : ComponentActivity() {
@@ -56,12 +59,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        updateManager.initialize()
         enableEdgeToEdge()
         val serviceIntent = Intent(this, ReceiverService::class.java)
         startForegroundService(serviceIntent)
         bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE)
         bound = true
+        // Update metadata never belongs on the launch path. WorkManager scheduling, its
+        // restoration file I/O, and the first HTTPS request all wait until the receiver is up and a
+        // manual connect from the Mac has had time to finish; the throttled daily worker still
+        // covers a TV that is left open.
+        lifecycleScope.launch {
+            delay(FIRST_UPDATE_CHECK_DELAY_MS)
+            updateManager.initialize()
+            updateManager.foregroundCheck()
+        }
 
         setContent {
             OpenDisplayTheme {
@@ -124,5 +135,11 @@ class MainActivity : ComponentActivity() {
 
     private fun clearKeepAwake() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private companion object {
+        /** Long enough for the listener to bind, Bonjour to register, and a Mac-initiated session
+         *  to reach video before any GitHub request competes for the device's radio and CPU. */
+        const val FIRST_UPDATE_CHECK_DELAY_MS = 12_000L
     }
 }

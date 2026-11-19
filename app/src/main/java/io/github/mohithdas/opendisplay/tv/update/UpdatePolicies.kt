@@ -82,15 +82,25 @@ object PackageSecurityPolicy {
 object UpdatePolicy {
     const val CHECK_INTERVAL_MS = 24L * 60L * 60L * 1_000L
 
+    /** Minimum spacing between attempts when none has succeeded, so an unreachable GitHub API
+     *  cannot restart its own long timeout chain on every foreground. */
+    const val RETRY_AFTER_FAILURE_INTERVAL_MS = 6L * 60L * 60L * 1_000L
+
     fun shouldCheck(
         manual: Boolean,
         automaticallyCheck: Boolean,
         lastSuccessMillis: Long?,
         nowMillis: Long,
-    ): Boolean = manual || (
-        automaticallyCheck &&
-            (lastSuccessMillis == null || nowMillis - lastSuccessMillis >= CHECK_INTERVAL_MS)
-        )
+        lastAttemptMillis: Long? = null,
+    ): Boolean {
+        if (manual) return true
+        if (!automaticallyCheck) return false
+        val staleAttempt = lastAttemptMillis == null ||
+            nowMillis - lastAttemptMillis >= RETRY_AFTER_FAILURE_INTERVAL_MS
+        val staleSuccess = lastSuccessMillis == null ||
+            nowMillis - lastSuccessMillis >= CHECK_INTERVAL_MS
+        return staleSuccess && staleAttempt
+    }
 
     fun shouldOfferVersion(version: String, skippedVersion: String?, remindedVersion: String?): Boolean =
         version != skippedVersion && version != remindedVersion

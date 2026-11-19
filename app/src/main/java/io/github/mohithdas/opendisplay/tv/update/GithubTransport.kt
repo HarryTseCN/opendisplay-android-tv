@@ -160,8 +160,11 @@ class UrlConnectionGithubTransport : GithubTransport {
     private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
 
     private companion object {
-        const val CONNECT_TIMEOUT_MS = 15_000
-        const val READ_TIMEOUT_MS = 30_000
+        // 15s connect + 30s read per hop, across up to six hops, is a five-minute worst case for a
+        // background metadata request on a device that is trying to do something else. A filtered
+        // or unreachable API host should fail fast and let the receiver keep its bandwidth.
+        const val CONNECT_TIMEOUT_MS = 8_000
+        const val READ_TIMEOUT_MS = 15_000
         const val MAX_REDIRECTS = 5
         val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
     }

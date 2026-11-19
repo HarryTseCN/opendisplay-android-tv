@@ -43,6 +43,25 @@ class UpdatePoliciesTest {
     }
 
     @Test
+    fun anUnreachableApiHostDoesNotRetryOnEveryForeground() {
+        val now = 100_000_000L
+        // Nothing has ever succeeded, so only the attempt stamp can hold a filtered or
+        // unreachable API host off the launch path of every cold start.
+        assertFalse(UpdatePolicy.shouldCheck(false, true, null, now, now - 60_000L))
+        assertTrue(
+            UpdatePolicy.shouldCheck(
+                false,
+                true,
+                null,
+                now,
+                now - UpdatePolicy.RETRY_AFTER_FAILURE_INTERVAL_MS,
+            ),
+        )
+        // A deliberate press in Settings is never throttled.
+        assertTrue(UpdatePolicy.shouldCheck(true, false, null, now, now))
+    }
+
+    @Test
     fun skippedAndDismissedVersionsAreNotOfferedAutomatically() {
         assertFalse(UpdatePolicy.shouldOfferVersion("0.1.1", "0.1.1", null))
         assertFalse(UpdatePolicy.shouldOfferVersion("0.1.1", null, "0.1.1"))

@@ -66,8 +66,15 @@ class UpdateManager private constructor(
         } catch (failure: Exception) {
             Log.warn("daily update scheduling unavailable; foreground checks remain available", failure)
         }
-        checkForUpdates(manual = false)
     }
+
+    /**
+     * The throttled foreground check, deliberately separate from [initialize]: cold start on a
+     * television already has a foreground service to bring up, a listener port to bind, and a
+     * Bonjour registration to retry, and none of that should queue behind an HTTPS request to a
+     * host that some networks cannot resolve at all.
+     */
+    fun foregroundCheck() = checkForUpdates(manual = false)
 
     fun checkForUpdates(manual: Boolean = true) {
         scope.launch { performCheck(manual = manual, background = false) }
@@ -151,9 +158,13 @@ class UpdateManager private constructor(
                     automaticallyCheck = snapshot.automaticallyCheck,
                     lastSuccessMillis = preferences.lastSuccessfulCheckMillis,
                     nowMillis = clock(),
+                    lastAttemptMillis = preferences.lastAttemptMillis,
                 )
             ) return@withLock null
 
+            // Stamped before the request so a timeout or a filtered DNS answer also counts as an
+            // attempt; `lastSuccessfulCheckMillis` only ever advances on a usable response.
+            preferences.lastAttemptMillis = clock()
             _state.value = snapshot.copy(phase = UpdatePhase.CHECKING, error = null)
             try {
                 val release = releaseSource.latestStable()
