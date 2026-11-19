@@ -409,7 +409,7 @@ class PhoneReceiver(
     /** Probes for an IDR until the stream's parameter sets arrive; see [StreamStartPolicy]. */
     private fun scheduleStreamStartKeyframes(generation: Int) {
         scope.launch {
-            StreamStartPolicy.keyframeRequestDelaysMs.forEach { delayMs ->
+            for (delayMs in StreamStartPolicy.keyframeRequestDelaysMs) {
                 delay(delayMs)
                 if (!StreamStartPolicy.shouldRequestKeyframe(
                         generation,
@@ -418,7 +418,7 @@ class PhoneReceiver(
                         videoHeadersSeen,
                     )
                 ) {
-                    return@launch
+                    break
                 }
                 Log.info("no video headers ${delayMs}ms after hello; requesting a keyframe")
                 requestKeyframe()
