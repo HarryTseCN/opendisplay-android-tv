@@ -1,0 +1,50 @@
+# Builds an installable debug APK for a fork of this repository.
+#
+# `.github/workflows/release.yml` signs with the project's private keystore secrets and its release
+# job is guarded by `if: github.repository == 'mohith-das/opendisplay-android-tv'`, so a fork can
+# never produce that artifact. A debug build uses Android's standard debug certificate and needs no
+# secrets at all: push the patched branch (or run this workflow manually from the Actions tab) and
+# download `app-debug.apk` from the run's Artifacts.
+#
+# Note for testing: the debug certificate differs from the production one, so uninstall the official
+# OpenDisplay TV APK before installing this build. Android rejects an update whose signing identity
+# changed, and the in-app updater will keep rejecting self-built candidates by design.
+name: Fork debug APK
+
+on:
+  push:
+    branches:
+      - "4k-and-faster-start"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Test and build the debug APK
+        run: ./gradlew testDebugUnitTest assembleDebug
+      - name: Upload the APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: OpenDisplay-TV-4k-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

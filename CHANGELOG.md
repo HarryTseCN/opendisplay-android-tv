@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. Versions follow semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- 4K televisions can select `3840×2160 (4K)` explicitly. The choice appears only when both the panel mode and the reported AVC decoder ceiling reach it; `Auto / Native` keeps its conservative 1080p behavior, so nothing changes for anyone who does not opt in.
+- Television `hello` messages now also carry the `panel` pixels/points/scale facts and `maxEncodeWide`/`maxEncodeHigh` (PROTOCOL.md 6.7 and 6.5). A sender that honors them builds a true HiDPI 4K desktop instead of assuming a 2× backing store and dividing the announced size by two. Handheld receivers stay on the legacy path until their density mapping is measured.
+
+### Fixed
+
+- A Mac that connects while the Activity is still binding the receiver service, or before the `SurfaceView` decoder is attached, no longer leaves a black screen until the sender's next periodic IDR. The receiver now probes with bounded `kf` requests until SPS/PPS have been seen.
+- Cold start no longer queues behind the GitHub API. The foreground update check waits until the receiver is up, an *attempt* rather than only a success throttles retries for six hours, and the HTTP timeouts were halved so a filtered or unreachable API host fails fast instead of stalling a television on every launch.
+- Fork builds: `.github/workflows/fork-apk.yml` produces an installable debug APK artifact without the project's private signing secrets.
+
 ## [0.1.3] - 2026-08-09
 
 ### Fixed
