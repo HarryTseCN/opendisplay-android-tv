@@ -43,6 +43,15 @@
     <string name="bonjour_status">Bonjour / NSD</string>
     <string name="connection_status">Connection</string>
     <string name="decoder_resolution">Decoder resolution</string>
+    <string name="force_uhd">Force 3840×2160 (advanced)</string>
+    <string name="force_uhd_warning">Overrides what Android reports about this panel. If the television truly renders at 1080p, the 4K stream can stutter or go black — turn this off to restore 1920×1080.</string>
+    <string name="detected_panel_mode">Panel mode reported by Android</string>
+    <string name="detected_window_bounds">App window</string>
+    <string name="detected_avc_maximum">H.264 hardware ceiling</string>
+    <string name="detected_avc_uhd_rate">H.264 at 3840×2160</string>
+    <string name="detected_avc_uhd_format">%1$d fps</string>
+    <string name="detected_avc_uhd_none">Not supported</string>
+    <string name="override_active">4K override</string>
     <string name="not_available">Not available</string>
     <string name="connection_connected">Connected and streaming</string>
     <string name="connection_waiting">Waiting for Mac</string>

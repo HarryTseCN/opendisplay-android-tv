@@ -97,11 +97,13 @@ Every control has an Android TV focus outline and works with a D-pad and OK butt
 ### Resolution and UI scale
 
 - **Auto / Native** chooses the active physical display mode while respecting the application window and AVC decoder capability. TVs reporting 4K are conservatively capped at 1080p in this release; 4K is never the default.
+- **3840×2160 (4K)** appears when the reported panel mode and the AVC decoder ceiling both reach it. Selecting it announces the panel's physical pixels, so the choice is a real opt-in per device rather than a change to anyone who leaves **Auto** alone.
+- **Force 3840×2160 (advanced)** unlocks that entry on televisions whose firmware reports only a 1080p display mode for a 4K panel — the system renders the interface at 1080p and the television upscales it, which detection alone cannot distinguish from a genuinely 1080p pipeline. Switching it on also moves **Auto** to 4K, switching it off hands the choice back to detection, and it never rewrites the numbers shown in Diagnostics. Announcing 4K to a pipeline that really renders at 1080p can stall or blank the stream, so this is a test switch, not a recommendation.
 - **1920×1080** and **1280×720** appear only when the display and decoder can support them.
 - **Auto UI scale** selects 1× on Android TV and a density-aware value on phones/tablets.
 - **1×** requests a full logical-pixel workspace; **2× HiDPI** requests larger interface elements.
 
-The selected pixel dimensions and scale are sent in every protocol `hello`, and a changed resolution triggers an updated hello. A current upstream Mac limitation is important: its virtual-display code still divides received pixel dimensions by two and does not yet apply the `scale` field. Consequently, the Mac may continue to expose a 960×540 logical workspace for a 1920×1080 hello even when 1× is selected. The Android setting and wire value are ready, but fully honoring 1× requires a compatible Mac-side change; this fork does not misrepresent or silently replace the upstream Mac app.
+The selected pixel dimensions and scale are sent in every protocol `hello`, and a changed resolution triggers an updated hello. Television hellos additionally carry the `panel` pixels/points/scale facts and `maxEncodeWide`/`maxEncodeHigh`, which a Mac app that reads them uses to build a true HiDPI 4K desktop. The legacy fields are unchanged for older senders, and one upstream limitation still matters: a sender that ignores `panel` divides the announced pixel dimensions by two and does not apply `scale`, so it may expose a 960×540 logical workspace for a 1920×1080 hello even when 1× is selected. The Android setting and wire value are ready, but fully honoring 1× requires a compatible Mac-side change; this fork does not misrepresent or silently replace the upstream Mac app.
 
 ### Fit to screen
 
@@ -120,7 +122,7 @@ The video surface, local cursor, touch input, and pointer coordinates share one 
 
 Phones and tablets default to **While connected**. The app uses `FLAG_KEEP_SCREEN_ON` and `SurfaceView.keepScreenOn`, releases them when no longer needed, and does not use deprecated brightness wake locks or an indefinite CPU wake lock. It can prevent Android's screensaver, Ambient Mode, dimming, and device sleep while active, but cannot override a physical television's separate sleep timer, eco mode, or automatic power-off configuration.
 
-The optional performance overlay reports FPS, approximate network throughput, latency, RTT, and approximate Java heap use. Diagnostics also show receiver name, IP, listener port, TCP status, Bonjour status, connection state, selected output, fit mode, awake policy, and decoder resolution.
+The optional performance overlay reports FPS, approximate network throughput, latency, RTT, and approximate Java heap use. Diagnostics also show receiver name, IP, listener port, TCP status, Bonjour status, connection state, selected output, fit mode, awake policy, and decoder resolution, plus what Android actually reported about this device: the panel mode, the app window, the H.264 decoder's hardware ceiling, the highest frame rate it claims at 3840×2160, and whether the 4K override is active. Those last rows are the fastest way to tell a 1080p output setting apart from a 4K-incapable decoder without an attached `adb`.
 
 ## In-app updates
 

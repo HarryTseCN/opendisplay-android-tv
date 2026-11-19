@@ -43,6 +43,15 @@
     <string name="bonjour_status">Bonjour / NSD</string>
     <string name="connection_status">Conexão</string>
     <string name="decoder_resolution">Resolução do decodificador</string>
+    <string name="force_uhd">Forçar 3840×2160 (avançado)</string>
+    <string name="force_uhd_warning">Substitui o que o Android informa sobre este painel. Se a televisão realmente renderiza em 1080p, o fluxo 4K pode travar ou ficar preto — desative para voltar a 1920×1080.</string>
+    <string name="detected_panel_mode">Modo do painel informado pelo Android</string>
+    <string name="detected_window_bounds">Janela do aplicativo</string>
+    <string name="detected_avc_maximum">Limite de hardware H.264</string>
+    <string name="detected_avc_uhd_rate">H.264 em 3840×2160</string>
+    <string name="detected_avc_uhd_format">%1$d fps</string>
+    <string name="detected_avc_uhd_none">Não suportado</string>
+    <string name="override_active">Substituição de 4K</string>
     <string name="not_available">Indisponível</string>
     <string name="connection_connected">Conectado e transmitindo</string>
     <string name="connection_waiting">Aguardando o Mac</string>

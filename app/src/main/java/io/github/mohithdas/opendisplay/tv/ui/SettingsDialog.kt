@@ -45,8 +45,10 @@ import io.github.mohithdas.opendisplay.tv.R
 import io.github.mohithdas.opendisplay.tv.net.ListenerPhase
 import io.github.mohithdas.opendisplay.tv.net.NsdPhase
 import io.github.mohithdas.opendisplay.tv.net.PhoneReceiver
+import io.github.mohithdas.opendisplay.tv.settings.DisplaySelector
 import io.github.mohithdas.opendisplay.tv.settings.FitMode
 import io.github.mohithdas.opendisplay.tv.settings.KeepAwakePolicy
+import io.github.mohithdas.opendisplay.tv.settings.PixelSize
 import io.github.mohithdas.opendisplay.tv.settings.ResolutionChoice
 import io.github.mohithdas.opendisplay.tv.settings.UiScaleChoice
 import io.github.mohithdas.opendisplay.tv.update.UpdateManager
@@ -66,6 +68,7 @@ fun SettingsDialog(
     val selection by receiver.displaySelection.collectAsState()
     val decoder by receiver.decoderResolution.collectAsState()
     val supportedResolutions by receiver.supportedResolutions.collectAsState()
+    val detected by receiver.detectedProfile.collectAsState()
     var draftName by remember(currentName) { mutableStateOf(currentName) }
     var editingName by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -152,6 +155,27 @@ fun SettingsDialog(
                         settings.copy(resolution = nextValue(settings.resolution, supportedResolutions)),
                     )
                 }
+                SettingChoice(
+                    stringResource(R.string.force_uhd),
+                    stringResource(if (settings.forceUhdResolution) R.string.enabled else R.string.disabled),
+                ) {
+                    val nextForce = !settings.forceUhdResolution
+                    // Un-forcing has to hand the choice back to detection: on a panel Android really
+                    // reports as 4K the UHD selection stays, on one it only ever saw 1080p there is
+                    // nothing to announce, so fall back to Auto rather than stream into a black box.
+                    val detectedChoices = DisplaySelector.supportedChoices(detected)
+                    val detectionStillOffersUhd = ResolutionChoice.UHD in detectedChoices
+                    val nextResolution = when {
+                        nextForce && settings.resolution == ResolutionChoice.AUTO -> ResolutionChoice.UHD
+                        !nextForce && settings.resolution == ResolutionChoice.UHD && !detectionStillOffersUhd ->
+                            ResolutionChoice.AUTO
+                        else -> settings.resolution
+                    }
+                    receiver.updateSettings(settings.copy(forceUhdResolution = nextForce, resolution = nextResolution))
+                }
+                if (settings.forceUhdResolution) {
+                    Text(stringResource(R.string.force_uhd_warning), color = Color(0xFFFFC857))
+                }
                 SettingChoice(stringResource(R.string.ui_scale), uiScaleLabel(settings.uiScale)) {
                     receiver.updateSettings(settings.copy(uiScale = nextValue(settings.uiScale, UiScaleChoice.entries)))
                 }
@@ -216,6 +240,20 @@ fun SettingsDialog(
                     decoder?.let { stringResource(R.string.dimension_format, it.width, it.height) }
                         ?: stringResource(R.string.not_available),
                 )
+                DiagnosticRow(stringResource(R.string.detected_panel_mode), dimensionText(detected.physicalMode))
+                DiagnosticRow(stringResource(R.string.detected_window_bounds), dimensionText(detected.windowBounds))
+                DiagnosticRow(
+                    stringResource(R.string.detected_avc_maximum),
+                    detected.avcHardMaximum?.let { dimensionText(it) } ?: stringResource(R.string.not_available),
+                )
+                DiagnosticRow(
+                    stringResource(R.string.detected_avc_uhd_rate),
+                    uhdRateText(detected.avcUhdFrameRate, detected.avcHardMaximum),
+                )
+                DiagnosticRow(
+                    stringResource(R.string.override_active),
+                    stringResource(if (settings.forceUhdResolution) R.string.enabled else R.string.disabled),
+                )
                 listener.addressAndPort?.let { address ->
                     TvActionButton(stringResource(R.string.copy_address), onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -259,6 +297,25 @@ private fun DiagnosticRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = Color.LightGray)
         Text(value, modifier = Modifier.padding(start = 24.dp))
+    }
+}
+
+@Composable
+private fun dimensionText(size: PixelSize): String =
+    stringResource(R.string.dimension_format, size.width, size.height)
+
+/**
+ * Whether the H.264 decoder itself claims 3840x2160, independent of the display mode. A rate here
+ * means the 4K override is worth testing; `not_available` means the vendor query is unavailable and
+ * `unsupported` means the panel can be lit by nothing at 4K no matter what it reports.
+ */
+@Composable
+private fun uhdRateText(frameRate: Double?, hardMaximum: PixelSize?): String {
+    val fps = frameRate?.toInt()
+    return when {
+        fps != null -> stringResource(R.string.detected_avc_uhd_format, fps)
+        hardMaximum == null -> stringResource(R.string.not_available)
+        else -> stringResource(R.string.detected_avc_uhd_none)
     }
 }
 

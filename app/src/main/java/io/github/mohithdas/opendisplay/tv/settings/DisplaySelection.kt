@@ -18,6 +18,20 @@ data class DisplayProfile(
     val decoderMaximum: PixelSize,
     val isTelevision: Boolean,
     val androidDensity: Double,
+    /**
+     * The H.264 decoder's own advertised bounds, before any clamp to the reported display mode.
+     *
+     * [decoderMaximum] can never exceed the mode Android reports, so on a television whose firmware
+     * only ever exposes a 1080p mode for a 4K panel it is this number — not that one — that says
+     * whether a 4K stream could be decoded at all. Null when the capability query is unavailable.
+     */
+    val avcHardMaximum: PixelSize? = null,
+    /**
+     * Highest frame rate the H.264 decoder claims to sustain at 3840x2160, or null if it does not
+     * claim 4K at any of the probed rates. Paired with [avcHardMaximum] in the Diagnostics rows,
+     * this is what separates "the firmware hides the panel" from "this box cannot decode 4K".
+     */
+    val avcUhdFrameRate: Double? = null,
 )
 
 data class DisplaySelection(val pixels: PixelSize, val scale: Double)
@@ -38,27 +52,55 @@ object DisplaySelector {
     private val FULL_HD = PixelSize(1920, 1080)
     private val HD = PixelSize(1280, 720)
 
-    fun supportedChoices(profile: DisplayProfile): List<ResolutionChoice> = buildList {
-        add(ResolutionChoice.AUTO)
-        if (supports(UHD, profile)) add(ResolutionChoice.UHD)
-        if (supports(FULL_HD, profile)) add(ResolutionChoice.FULL_HD)
-        if (supports(HD, profile)) add(ResolutionChoice.HD)
+    /**
+     * The profile the receiver announces when the advanced 4K override is on.
+     *
+     * Television firmware commonly reports a 1080p display mode for a 4K panel: the interface is
+     * rendered at 1080p and the television upscales it, so detection alone can never offer UHD even
+     * when the H.264 decoder is happy to take 3840x2160. The override treats the panel as UHD for
+     * the offered choices, the announced size, and the panel facts, which turns the unanswerable
+     * question "is the pipeline really 1080p?" into one the user can test and revert. It leaves any
+     * profile that already reaches UHD untouched, and it deliberately does not change what `Auto`
+     * announces — the override unlocks a menu entry, it does not silently re-decide the default.
+     */
+    fun effectiveProfile(profile: DisplayProfile, forceUhd: Boolean): DisplayProfile {
+        if (!forceUhd || profile.physicalMode.longEdge >= UHD.longEdge) return profile
+        val pixels = oriented(UHD, profile.windowBounds)
+        return profile.copy(
+            physicalMode = pixels,
+            decoderMaximum = if (profile.decoderMaximum.longEdge >= UHD.longEdge) {
+                profile.decoderMaximum
+            } else {
+                pixels
+            },
+        )
     }
+
+    fun supportedChoices(profile: DisplayProfile, forceUhd: Boolean = false): List<ResolutionChoice> =
+        buildList {
+            val source = effectiveProfile(profile, forceUhd)
+            add(ResolutionChoice.AUTO)
+            if (supports(UHD, source)) add(ResolutionChoice.UHD)
+            if (supports(FULL_HD, source)) add(ResolutionChoice.FULL_HD)
+            if (supports(HD, source)) add(ResolutionChoice.HD)
+        }
 
     fun select(
         profile: DisplayProfile,
         resolution: ResolutionChoice,
         uiScale: UiScaleChoice,
+        forceUhd: Boolean = false,
     ): DisplaySelection {
+        val source = effectiveProfile(profile, forceUhd)
         val requested = when (resolution) {
-            ResolutionChoice.AUTO -> automaticSize(profile)
-            ResolutionChoice.UHD -> oriented(UHD, profile.windowBounds)
-            ResolutionChoice.FULL_HD -> oriented(FULL_HD, profile.windowBounds)
-            ResolutionChoice.HD -> oriented(HD, profile.windowBounds)
+            ResolutionChoice.AUTO -> automaticSize(source)
+            ResolutionChoice.UHD -> oriented(UHD, source.windowBounds)
+            ResolutionChoice.FULL_HD -> oriented(FULL_HD, source.windowBounds)
+            ResolutionChoice.HD -> oriented(HD, source.windowBounds)
         }
-        val safe = fitWithin(requested, profile.physicalMode, profile.decoderMaximum)
+        val safe = fitWithin(requested, source.physicalMode, source.decoderMaximum)
         val scale = when (uiScale) {
-            UiScaleChoice.AUTO -> if (profile.isTelevision || profile.androidDensity < 1.5) 1.0 else 2.0
+            UiScaleChoice.AUTO -> if (source.isTelevision || source.androidDensity < 1.5) 1.0 else 2.0
             UiScaleChoice.ONE -> 1.0
             UiScaleChoice.TWO -> 2.0
         }

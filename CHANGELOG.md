@@ -6,8 +6,10 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ### Added
 
-- 4K televisions can select `3840×2160 (4K)` explicitly. The choice appears only when both the panel mode and the reported AVC decoder ceiling reach it; `Auto / Native` keeps its conservative 1080p behavior, so nothing changes for anyone who does not opt in.
+- 4K televisions can select `3840×2160 (4K)` explicitly. The choice appears when both the panel mode and the reported AVC decoder ceiling reach it; `Auto / Native` keeps its conservative 1080p behavior, so nothing changes for anyone who does not opt in.
 - Television `hello` messages now also carry the `panel` pixels/points/scale facts and `maxEncodeWide`/`maxEncodeHigh` (PROTOCOL.md 6.7 and 6.5). A sender that honors them builds a true HiDPI 4K desktop instead of assuming a 2× backing store and dividing the announced size by two. Handheld receivers stay on the legacy path until their density mapping is measured.
+- **Settings & Diagnostics** now report what Android actually told the receiver: the panel mode, the app window, the H.264 decoder's own hardware ceiling, and the highest frame rate it claims at 3840×2160. These separate "the firmware only exposes a 1080p mode" from "this device cannot decode 4K" without needing `adb`.
+- An advanced **Force 3840×2160** switch announces 4K even when the reported display mode is 1080p, for televisions whose system renders the interface at 1080p and lets the panel upscale it. It changes only what the receiver announces, never the detected facts shown in Diagnostics, and switching it off returns to what detection reports.
 
 ### Fixed
 

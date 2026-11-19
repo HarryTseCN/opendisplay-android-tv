@@ -102,6 +102,59 @@ class DisplaySelectorTest {
         assertEquals(2.0, facts.scale, 0.0)
     }
 
+    @Test
+    fun theOverrideUnlocksFourKWhenAndroidReportsOnlyFullHd() {
+        val source = fullHdModeProfile()
+        assertFalse(ResolutionChoice.UHD in DisplaySelector.supportedChoices(source))
+        assertTrue(ResolutionChoice.UHD in DisplaySelector.supportedChoices(source, forceUhd = true))
+    }
+
+    @Test
+    fun theOverrideAnnouncesFourKWithHiDpiPanelFacts() {
+        val forced = DisplaySelector.effectiveProfile(fullHdModeProfile(), forceUhd = true)
+        val announced = DisplaySelector.select(forced, ResolutionChoice.UHD, UiScaleChoice.AUTO)
+        assertEquals(PixelSize(3840, 2160), announced.pixels)
+        val facts = DisplaySelector.televisionPanelFacts(forced)
+        assertEquals(PixelSize(3840, 2160), facts.pixels)
+        assertEquals(PixelSize(1920, 1080), facts.points)
+        assertEquals(2.0, facts.scale, 0.0)
+    }
+
+    @Test
+    fun theOverrideLeavesAProfileThatAlreadyReachesFourKUntouched() {
+        val source = profile(isTv = true)
+        assertEquals(source, DisplaySelector.effectiveProfile(source, forceUhd = true))
+    }
+
+    @Test
+    fun theOverrideDoesNotPromoteTheConservativeAutoChoice() {
+        // The switch unlocks a menu entry; it must not silently re-decide what Auto announces, or
+        // turning it on would change a session the user never asked to move to 4K.
+        val forced = DisplaySelector.effectiveProfile(fullHdModeProfile(), forceUhd = true)
+        val result = DisplaySelector.select(forced, ResolutionChoice.AUTO, UiScaleChoice.AUTO)
+        assertEquals(PixelSize(1920, 1080), result.pixels)
+    }
+
+    @Test
+    fun theOverrideFollowsAPortraitAppWindow() {
+        val source = fullHdModeProfile().copy(windowBounds = PixelSize(1080, 1920))
+        assertEquals(PixelSize(2160, 3840), DisplaySelector.effectiveProfile(source, forceUhd = true).physicalMode)
+    }
+
+    @Test
+    fun theOverrideKeepsTheDetectedHardwareFactsForDiagnostics() {
+        val source = fullHdModeProfile().copy(avcHardMaximum = PixelSize(4096, 2304), avcUhdFrameRate = 60.0)
+        val forced = DisplaySelector.effectiveProfile(source, forceUhd = true)
+        assertEquals(PixelSize(4096, 2304), forced.avcHardMaximum)
+        assertEquals(60.0, forced.avcUhdFrameRate ?: 0.0, 0.0)
+    }
+
+    private fun fullHdModeProfile() = profile(isTv = true).copy(
+        physicalMode = PixelSize(1920, 1080),
+        windowBounds = PixelSize(1920, 1080),
+        decoderMaximum = PixelSize(1920, 1080),
+    )
+
     private fun profile(isTv: Boolean) = DisplayProfile(
         physicalMode = PixelSize(3840, 2160),
         windowBounds = PixelSize(1920, 1080),

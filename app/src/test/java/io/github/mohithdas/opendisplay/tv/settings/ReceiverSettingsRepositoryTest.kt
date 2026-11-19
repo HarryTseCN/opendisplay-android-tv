@@ -13,6 +13,7 @@ class ReceiverSettingsRepositoryTest {
         assertEquals(ResolutionChoice.AUTO, television.resolution)
         assertEquals(FitMode.FIT, television.fitMode)
         assertFalse(television.performanceOverlay)
+        assertFalse(television.forceUhdResolution)
         assertEquals(KeepAwakePolicy.WHILE_OPEN, television.keepAwakePolicy)
         assertEquals(KeepAwakePolicy.WHILE_CONNECTED, handheld.keepAwakePolicy)
     }
@@ -27,6 +28,7 @@ class ReceiverSettingsRepositoryTest {
             fitMode = FitMode.FILL,
             keepAwakePolicy = KeepAwakePolicy.NEVER,
             performanceOverlay = true,
+            forceUhdResolution = true,
         )
         first.update(expected)
 

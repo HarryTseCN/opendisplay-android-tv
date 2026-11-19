@@ -5,6 +5,7 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
+import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
@@ -84,13 +85,73 @@ object DisplayProfileProvider {
         physical: PixelSize,
         window: PixelSize,
         density: Double,
-    ): DisplayProfile = DisplayProfile(
-        physicalMode = physical,
-        windowBounds = window,
-        decoderMaximum = reliableAvcMaximum(physical),
-        isTelevision = isTelevision(context),
-        androidDensity = density.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
-    )
+    ): DisplayProfile {
+        val capabilities = bestAvcCapabilities()
+        return DisplayProfile(
+            physicalMode = physical,
+            windowBounds = window,
+            decoderMaximum = reliableAvcMaximum(physical, capabilities),
+            isTelevision = isTelevision(context),
+            androidDensity = density.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
+            avcHardMaximum = avcHardMaximum(capabilities),
+            avcUhdFrameRate = avcUhdFrameRate(capabilities),
+        )
+    }
+
+    /**
+     * The most capable H.264 decoder on the device rather than the first one enumerated. A
+     * television typically ships a software decoder alongside the hardware one, and the software
+     * entry advertises a far smaller ceiling, so picking by name order would understate the box
+     * and hide the 4K option from a panel that can decode it.
+     */
+    private fun bestAvcCapabilities(): MediaCodecInfo.VideoCapabilities? = try {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { info ->
+                !info.isEncoder && info.supportedTypes.any { type ->
+                    type.equals(MediaFormat.MIMETYPE_VIDEO_AVC, true)
+                }
+            }
+            .mapNotNull { it.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)?.videoCapabilities }
+            .maxByOrNull { capabilities ->
+                boundsProduct(capabilities)
+            }
+    } catch (failure: Exception) {
+        Log.warn("AVC decoder enumeration failed; hardware ceiling unknown", failure)
+        null
+    }
+
+    private fun boundsProduct(capabilities: MediaCodecInfo.VideoCapabilities): Long {
+        val width = capabilities.supportedWidths?.upper?.toLong() ?: 0L
+        val height = capabilities.supportedHeights?.upper?.toLong() ?: 0L
+        return width * height
+    }
+
+    /** The decoder's advertised bounds, uncapped by the display mode — reported in Diagnostics. */
+    private fun avcHardMaximum(capabilities: MediaCodecInfo.VideoCapabilities?): PixelSize? {
+        val width: Int = capabilities?.supportedWidths?.upper ?: return null
+        val height: Int = capabilities.supportedHeights?.upper ?: return null
+        return if (width >= 2 && height >= 2) PixelSize(width, height) else null
+    }
+
+    private val uhdFrameRateProbe = listOf(60.0, 50.0, 30.0, 25.0, 24.0)
+
+    /** Highest frame rate the decoder claims at 3840x2160, or null when it claims none. */
+    private fun avcUhdFrameRate(capabilities: MediaCodecInfo.VideoCapabilities?): Double? {
+        val caps = capabilities ?: return null
+        return try {
+            uhdFrameRateProbe.firstOrNull { rate ->
+                try {
+                    caps.isSizeSupportedForFrameRate(3840, 2160, rate.toFloat())
+                } catch (failure: Exception) {
+                    Log.warn("vendor AVC frame-rate query failed at ${rate}fps", failure)
+                    false
+                }
+            }
+        } catch (failure: Exception) {
+            Log.warn("AVC 4K frame-rate probe failed", failure)
+            null
+        }
+    }
 
     private fun modeSize(display: Display?): PixelSize? = try {
         val mode = display?.mode ?: return null
@@ -108,28 +169,17 @@ object DisplayProfileProvider {
         false
     }
 
-    private fun reliableAvcMaximum(physical: PixelSize): PixelSize {
+    private fun reliableAvcMaximum(physical: PixelSize, capabilities: MediaCodecInfo.VideoCapabilities?): PixelSize {
+        if (capabilities == null) return HD
         val candidates = listOf(physical, FULL_HD, HD)
-        return try {
-            val codec = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
-                !it.isEncoder && it.supportedTypes.any { type ->
-                    type.equals(MediaFormat.MIMETYPE_VIDEO_AVC, true)
-                }
-            } ?: return HD
-            val capabilities = codec.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                .videoCapabilities ?: return HD
-            candidates.firstOrNull { candidate ->
-                try {
-                    capabilities.isSizeSupported(candidate.width, candidate.height)
-                } catch (failure: Exception) {
-                    Log.warn("vendor AVC capability query failed", failure)
-                    false
-                }
-            } ?: HD
-        } catch (failure: Exception) {
-            Log.warn("AVC decoder detection failed; using conservative 1280x720", failure)
-            HD
-        }
+        return candidates.firstOrNull { candidate ->
+            try {
+                capabilities.isSizeSupported(candidate.width, candidate.height)
+            } catch (failure: Exception) {
+                Log.warn("vendor AVC capability query failed", failure)
+                false
+            }
+        } ?: HD
     }
 
     private fun safePixelSize(width: Int, height: Int): PixelSize? =

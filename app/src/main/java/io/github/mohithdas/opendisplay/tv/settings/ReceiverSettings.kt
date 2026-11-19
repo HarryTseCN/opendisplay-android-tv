@@ -20,6 +20,13 @@ data class ReceiverSettings(
     val fitMode: FitMode = FitMode.FIT,
     val keepAwakePolicy: KeepAwakePolicy,
     val performanceOverlay: Boolean = false,
+    /**
+     * Advanced override for televisions whose firmware reports a 1080p display mode for a 4K
+     * panel. Off by default: announcing 3840x2160 to a pipeline that really renders at 1080p can
+     * stall or black out the stream, so it has to be a deliberate choice rather than something
+     * detection makes on its own.
+     */
+    val forceUhdResolution: Boolean = false,
 )
 
 internal interface SettingsStorage {
@@ -63,6 +70,7 @@ internal class ReceiverSettingsRepository(
         storage.putString(KEY_FIT_MODE, value.fitMode.name)
         storage.putString(KEY_KEEP_AWAKE, value.keepAwakePolicy.name)
         storage.putBoolean(KEY_PERFORMANCE_OVERLAY, value.performanceOverlay)
+        storage.putBoolean(KEY_FORCE_UHD, value.forceUhdResolution)
         _settings.value = value
     }
 
@@ -72,6 +80,7 @@ internal class ReceiverSettingsRepository(
         fitMode = storage.enumValue(KEY_FIT_MODE, FitMode.FIT),
         keepAwakePolicy = storage.enumValue(KEY_KEEP_AWAKE, defaultAwakePolicy),
         performanceOverlay = storage.getBoolean(KEY_PERFORMANCE_OVERLAY, false),
+        forceUhdResolution = storage.getBoolean(KEY_FORCE_UHD, false),
     )
 
     private inline fun <reified T : Enum<T>> SettingsStorage.enumValue(key: String, fallback: T): T =
@@ -83,5 +92,6 @@ internal class ReceiverSettingsRepository(
         const val KEY_FIT_MODE = "fitMode"
         const val KEY_KEEP_AWAKE = "keepAwake"
         const val KEY_PERFORMANCE_OVERLAY = "performanceOverlay"
+        const val KEY_FORCE_UHD = "forceUhd"
     }
 }

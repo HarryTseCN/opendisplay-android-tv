@@ -147,10 +147,20 @@ class PhoneReceiver(
     )
     val settings: StateFlow<ReceiverSettings> = settingsRepository.settings
 
+    /**
+     * What Android actually reports about this panel and its H.264 decoder, before the advanced 4K
+     * override rewrites it. Diagnostics read this so turning the override on cannot hide the
+     * numbers that motivated it.
+     */
+    private val _detectedProfile = MutableStateFlow(displayProfile)
+    val detectedProfile: StateFlow<DisplayProfile> = _detectedProfile.asStateFlow()
+
     private val _displaySelection = MutableStateFlow(resolveDisplaySelection())
     val displaySelection: StateFlow<DisplaySelection> = _displaySelection.asStateFlow()
 
-    private val _supportedResolutions = MutableStateFlow(DisplaySelector.supportedChoices(displayProfile))
+    private val _supportedResolutions = MutableStateFlow(
+        DisplaySelector.supportedChoices(displayProfile, settings.value.forceUhdResolution),
+    )
     val supportedResolutions: StateFlow<List<ResolutionChoice>> = _supportedResolutions.asStateFlow()
 
     @Volatile private var serverSocket: ServerSocket? = null
@@ -276,7 +286,19 @@ class PhoneReceiver(
     fun updateDisplayProfile(profile: DisplayProfile) {
         val oldProfile = displayProfile
         displayProfile = profile
-        _supportedResolutions.value = DisplaySelector.supportedChoices(profile)
+        _detectedProfile.value = profile
+        val hardwareCeiling = profile.avcHardMaximum?.let { "${it.width}x${it.height}" } ?: "unknown"
+        val uhdDecodeRate = profile.avcUhdFrameRate?.let { "${it.toInt()}fps" } ?: "unknown"
+        Log.info(
+            "display profile: mode ${profile.physicalMode.width}x${profile.physicalMode.height} " +
+                "window ${profile.windowBounds.width}x${profile.windowBounds.height} " +
+                "avcMax ${profile.decoderMaximum.width}x${profile.decoderMaximum.height} " +
+                "hardwareCeiling $hardwareCeiling uhdAt $uhdDecodeRate",
+        )
+        _supportedResolutions.value = DisplaySelector.supportedChoices(
+            profile,
+            settings.value.forceUhdResolution,
+        )
         val old = _displaySelection.value
         val updated = resolveDisplaySelection()
         _displaySelection.value = updated
@@ -289,6 +311,10 @@ class PhoneReceiver(
     fun updateSettings(updated: ReceiverSettings) {
         val oldSelection = _displaySelection.value
         settingsRepository.update(updated)
+        _supportedResolutions.value = DisplaySelector.supportedChoices(
+            displayProfile,
+            updated.forceUhdResolution,
+        )
         val newSelection = resolveDisplaySelection()
         _displaySelection.value = newSelection
         if (newSelection != oldSelection && connected.value) {
@@ -333,8 +359,12 @@ class PhoneReceiver(
 
     fun requestKeyframe() = sendControl(JSONObject().put("type", WireMessage.KEYFRAME_REQUEST))
 
+    /** [displayProfile] as it is actually announced, with the advanced 4K override applied. */
+    private fun effectiveDisplayProfile(): DisplayProfile =
+        DisplaySelector.effectiveProfile(displayProfile, settings.value.forceUhdResolution)
+
     private fun resolveDisplaySelection(): DisplaySelection = DisplaySelector.select(
-        displayProfile,
+        effectiveDisplayProfile(),
         settings.value.resolution,
         settings.value.uiScale,
     )
@@ -530,7 +560,7 @@ class PhoneReceiver(
 
     private fun sendHello() {
         val selection = _displaySelection.value
-        val profile = displayProfile
+        val profile = effectiveDisplayProfile()
         val message = JSONObject()
             .put("type", WireMessage.HELLO)
             .put("pixelsWide", selection.pixels.width)
@@ -558,10 +588,11 @@ class PhoneReceiver(
                     .put("pointsHigh", facts.points.height),
             ).put("maxEncodeWide", profile.decoderMaximum.width)
                 .put("maxEncodeHigh", profile.decoderMaximum.height)
+            val override = if (settings.value.forceUhdResolution) ", 4K override" else ""
             Log.info(
                 "hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x, " +
                     "panel ${facts.pixels.width}x${facts.pixels.height}@${facts.scale}x " +
-                    "points ${facts.points.width}x${facts.points.height})",
+                    "points ${facts.points.width}x${facts.points.height}$override)",
             )
         } else {
             Log.info("hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x)")
