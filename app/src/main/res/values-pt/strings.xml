@@ -46,6 +46,11 @@
     <string name="force_uhd">Forçar 3840×2160 (avançado)</string>
     <string name="force_uhd_warning">Substitui o que o Android informa sobre este painel. Se a televisão realmente renderiza em 1080p, o fluxo 4K pode travar ou ficar preto — desative para voltar a 1920×1080.</string>
     <string name="detected_panel_mode">Modo do painel informado pelo Android</string>
+    <string name="detected_refresh_rate">Taxa de atualização do painel</string>
+    <string name="detected_panel_modes">Modos disponíveis do painel</string>
+    <string name="refresh_rate_format">%1$s Hz</string>
+    <string name="stream_rate">Taxa medida do fluxo</string>
+    <string name="stream_rate_format">%1$d fps</string>
     <string name="detected_window_bounds">Janela do aplicativo</string>
     <string name="detected_avc_maximum">Limite de hardware H.264</string>
     <string name="detected_avc_uhd_rate">H.264 em 3840×2160</string>

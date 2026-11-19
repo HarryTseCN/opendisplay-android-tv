@@ -48,10 +48,12 @@ import io.github.mohithdas.opendisplay.tv.net.PhoneReceiver
 import io.github.mohithdas.opendisplay.tv.settings.DisplaySelector
 import io.github.mohithdas.opendisplay.tv.settings.FitMode
 import io.github.mohithdas.opendisplay.tv.settings.KeepAwakePolicy
+import io.github.mohithdas.opendisplay.tv.settings.ModeFact
 import io.github.mohithdas.opendisplay.tv.settings.PixelSize
 import io.github.mohithdas.opendisplay.tv.settings.ResolutionChoice
 import io.github.mohithdas.opendisplay.tv.settings.UiScaleChoice
 import io.github.mohithdas.opendisplay.tv.update.UpdateManager
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsDialog(
@@ -69,6 +71,7 @@ fun SettingsDialog(
     val decoder by receiver.decoderResolution.collectAsState()
     val supportedResolutions by receiver.supportedResolutions.collectAsState()
     val detected by receiver.detectedProfile.collectAsState()
+    val perf by receiver.perf.collectAsState()
     var draftName by remember(currentName) { mutableStateOf(currentName) }
     var editingName by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -232,6 +235,14 @@ fun SettingsDialog(
                     stringResource(R.string.resolution),
                     stringResource(R.string.dimension_format, selection.pixels.width, selection.pixels.height),
                 )
+                DiagnosticRow(
+                    stringResource(R.string.stream_rate),
+                    if (perf.fps > 0) {
+                        stringResource(R.string.stream_rate_format, perf.fps)
+                    } else {
+                        stringResource(R.string.not_available)
+                    },
+                )
                 DiagnosticRow(stringResource(R.string.ui_scale), stringResource(R.string.scale_format, selection.scale))
                 DiagnosticRow(stringResource(R.string.fit_mode), fitModeLabel(settings.fitMode))
                 DiagnosticRow(stringResource(R.string.keep_screen_awake), awakeLabel(settings.keepAwakePolicy))
@@ -241,6 +252,11 @@ fun SettingsDialog(
                         ?: stringResource(R.string.not_available),
                 )
                 DiagnosticRow(stringResource(R.string.detected_panel_mode), dimensionText(detected.physicalMode))
+                DiagnosticRow(
+                    stringResource(R.string.detected_refresh_rate),
+                    refreshRateText(detected.refreshRateHz),
+                )
+                DiagnosticRow(stringResource(R.string.detected_panel_modes), panelModesText(detected.supportedModes))
                 DiagnosticRow(stringResource(R.string.detected_window_bounds), dimensionText(detected.windowBounds))
                 DiagnosticRow(
                     stringResource(R.string.detected_avc_maximum),
@@ -303,6 +319,41 @@ private fun DiagnosticRow(label: String, value: String) {
 @Composable
 private fun dimensionText(size: PixelSize): String =
     stringResource(R.string.dimension_format, size.width, size.height)
+
+/**
+ * A refresh rate as the panel reported it. Trailing zeros are dropped so a 60 Hz mode reads "60 Hz"
+ * and Android's 59.94/23.976 pull-down variants still show the difference that matters — whether a
+ * 4K mode is a real 60 Hz mode or a 30 Hz one.
+ */
+@Composable
+private fun refreshRateText(hertz: Double): String = if (hertz <= 0.0) {
+    stringResource(R.string.not_available)
+} else {
+    stringResource(R.string.refresh_rate_format, trimHertz(hertz))
+}
+
+/**
+ * Every mode the television enumerated, biggest and fastest first. This is the row that answers the
+ * question the 1080p ceiling actually turns on: a list containing 3840×2160 means the panel is there
+ * and the active mode is a setting, while a list of 1080p entries only ever means Android is being
+ * told 1080p and the Force 4K switch is the way to test what the pipeline really accepts.
+ */
+@Composable
+private fun panelModesText(modes: List<ModeFact>): String {
+    if (modes.isEmpty()) return stringResource(R.string.not_available)
+    val sorted = modes.distinct().sortedWith(
+        compareByDescending<ModeFact> { it.pixels.longEdge }.thenByDescending { it.refreshRateHz },
+    )
+    val shown = sorted.take(3).joinToString(" · ") {
+        "${it.pixels.width}×${it.pixels.height} ${trimHertz(it.refreshRateHz)}Hz"
+    }
+    return if (sorted.size > 3) "$shown …" else shown
+}
+
+private fun trimHertz(hertz: Double): String {
+    val rounded = (hertz * 100).roundToInt() / 100.0
+    return if (rounded % 1.0 == 0.0) rounded.toInt().toString() else rounded.toString()
+}
 
 /**
  * Whether the H.264 decoder itself claims 3840x2160, independent of the display mode. A rate here

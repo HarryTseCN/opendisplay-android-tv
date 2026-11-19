@@ -46,6 +46,11 @@
     <string name="force_uhd">Force 3840×2160 (advanced)</string>
     <string name="force_uhd_warning">Overrides what Android reports about this panel. If the television truly renders at 1080p, the 4K stream can stutter or go black — turn this off to restore 1920×1080.</string>
     <string name="detected_panel_mode">Panel mode reported by Android</string>
+    <string name="detected_refresh_rate">Panel refresh rate</string>
+    <string name="detected_panel_modes">Panel modes available</string>
+    <string name="refresh_rate_format">%1$s Hz</string>
+    <string name="stream_rate">Stream rate measured</string>
+    <string name="stream_rate_format">%1$d fps</string>
     <string name="detected_window_bounds">App window</string>
     <string name="detected_avc_maximum">H.264 hardware ceiling</string>
     <string name="detected_avc_uhd_rate">H.264 at 3840×2160</string>

@@ -27,14 +27,41 @@ data class DisplayProfile(
      */
     val avcHardMaximum: PixelSize? = null,
     /**
-     * Highest frame rate the H.264 decoder claims to sustain at 3840x2160, or null if it does not
-     * claim 4K at any of the probed rates. Paired with [avcHardMaximum] in the Diagnostics rows,
-     * this is what separates "the firmware hides the panel" from "this box cannot decode 4K".
+     * Highest frame rate the H.264 decoder claims to sustain at 3840x2160, or null when it claims
+     * no rate at that raster. Paired with [avcHardMaximum] in the Diagnostics rows, this is what
+     * separates "the firmware hides the panel" from "this box cannot decode 4K".
      */
     val avcUhdFrameRate: Double? = null,
+    /**
+     * Highest frame rate the H.264 decoder claims to sustain at the announced [decoderMaximum]
+     * raster, or null when the query is unavailable or the codec gives no rate for that size. This
+     * is the number a sender needs alongside [avcHardMaximum]: a box can advertise 4096x2304 and
+     * only sustain it at 30 FPS.
+     */
+    val avcMaxFrameRate: Double? = null,
+    /** Refresh rate of the active display mode in Hz, or 0.0 when the query is unavailable. */
+    val refreshRateHz: Double = 0.0,
+    /**
+     * Every mode the display enumerated, each with its own refresh rate. On a 4K television this is
+     * the list that says whether the firmware exposes a 3840x2160 mode at all, and at what rate —
+     * the difference between "this panel only does 1080p", "4K is 30 Hz here", and "4K at 60 Hz is
+     * available but Android reports the active mode as 1080p". Empty when unavailable.
+     */
+    val supportedModes: List<ModeFact> = emptyList(),
 )
 
 data class DisplaySelection(val pixels: PixelSize, val scale: Double)
+
+/** One mode the display enumerated: what it can light, and how fast it can do it. */
+data class ModeFact(val pixels: PixelSize, val refreshRateHz: Double)
+
+/**
+ * The stream envelope a sender may build: the largest raster the receiver will take, and the
+ * highest rate it can be presented at — the binding constraint of the decoder's claim and the
+ * panel's own refresh rate, never more than either. Absent rate means the receiver measured none
+ * and the sender's legacy default applies.
+ */
+data class DecodeEnvelope(val pixels: PixelSize, val maxFrameRateHz: Int?)
 
 /**
  * Panel facts for `hello.panel` (PROTOCOL.md 6.7): the physical pixels the panel
@@ -116,6 +143,63 @@ object DisplaySelector {
         val points = profile.windowBounds
         val pixels = oriented(profile.physicalMode, points)
         return PanelFacts(pixels, backingScale(pixels, points), points)
+    }
+
+    /**
+     * The highest rate the panel can present (`hello.displayMaxFrameRate`, PROTOCOL.md 6.1): the
+     * fastest enumerated mode, or the active mode when a vendor exposes no list. Null means nothing
+     * was measured, which is deliberately not the same as 0 — an absent field keeps the sender's
+     * legacy 60 FPS default, while a claimed ceiling it has to honour would cap the stream instead.
+     *
+     * Rates round to the nearest whole number because Android reports nominal 60 and 24 Hz modes as
+     * 59.94 and 23.976; announcing the rounded rate gives the sender the mode it expects rather than
+     * one it would reject as unsupported.
+     */
+    fun displayMaxFrameRate(profile: DisplayProfile): Int? =
+        (
+            profile.supportedModes.maxOfOrNull { it.refreshRateHz }
+                ?: profile.refreshRateHz.takeIf { it > 0.0 }
+            )?.let { it.roundToInt().coerceAtLeast(1) }
+
+    /**
+     * The H.264 entry for `hello.videoCaps` (PROTOCOL.md 6.5).
+     *
+     * [avcHardMaximum] alone would let a sender build a stream the television cannot present: a
+     * decoder that claims 4096x2304 can still be paired with a 30 Hz panel, and one that claims
+     * 60 FPS at 4K can be paired with a firmware that only ever lights 1080p. So the raster is the
+     * announced ceiling and the rate is the binding constraint of the decoder's own claim at that
+     * raster and the panel's fastest mode. HEVC is never advertised — this receiver decodes H.264
+     * only, and a sender that sees an `hevc` entry would switch codecs into a stream that cannot be
+     * played at all.
+     */
+    fun h264Envelope(profile: DisplayProfile, forceUhd: Boolean = false): DecodeEnvelope {
+        val raster = effectiveProfile(profile, forceUhd).decoderMaximum
+        val decoderRate = if (raster.longEdge >= UHD.longEdge) {
+            profile.avcUhdFrameRate
+        } else {
+            profile.avcMaxFrameRate
+        }
+        val bindingRate = listOfNotNull(decoderRate, panelRateFor(profile, raster)?.toDouble())
+            .minOrNull()
+            ?.roundToInt()
+        return DecodeEnvelope(raster, bindingRate)
+    }
+
+    /**
+     * The panel's fastest rate that actually covers [raster]. A firmware that enumerates
+     * 3840x2160@30 alongside 1920x1080@60 must not have its 60 Hz mode quoted next to a 4K ceiling,
+     * because the sender would read that as permission to stream 4K at 60 FPS. When no enumerated
+     * mode reaches the raster — the case the 4K override exists for — the list's fastest rate is the
+     * best evidence there is, and an empty list falls back to the active mode.
+     */
+    private fun panelRateFor(profile: DisplayProfile, raster: PixelSize): Int? {
+        val covering = profile.supportedModes.filter {
+            it.pixels.longEdge >= raster.longEdge && it.pixels.shortEdge >= raster.shortEdge
+        }
+        val hertz = covering.maxOfOrNull { it.refreshRateHz }
+            ?: profile.supportedModes.maxOfOrNull { it.refreshRateHz }
+            ?: profile.refreshRateHz.takeIf { it > 0.0 }
+        return hertz?.let { it.roundToInt().coerceAtLeast(1) }
     }
 
     private fun backingScale(pixels: PixelSize, points: PixelSize): Double {

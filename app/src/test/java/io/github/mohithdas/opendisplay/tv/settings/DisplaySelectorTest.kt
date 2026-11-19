@@ -2,6 +2,7 @@ package io.github.mohithdas.opendisplay.tv.settings
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -148,6 +149,77 @@ class DisplaySelectorTest {
         assertEquals(PixelSize(4096, 2304), forced.avcHardMaximum)
         assertEquals(60.0, forced.avcUhdFrameRate ?: 0.0, 0.0)
     }
+
+    @Test
+    fun panelMaxFrameRateUsesTheFastestEnumeratedMode() {
+        val profile = profile(isTv = true).copy(
+            supportedModes = listOf(
+                ModeFact(PixelSize(1920, 1080), 59.94),
+                ModeFact(PixelSize(1280, 720), 30.0),
+            ),
+        )
+        assertEquals(60, DisplaySelector.displayMaxFrameRate(profile))
+    }
+
+    @Test
+    fun panelMaxFrameRateFallsBackToTheActiveModeAndStaysAbsentWhenNothingIsKnown() {
+        assertEquals(
+            30,
+            DisplaySelector.displayMaxFrameRate(profile(isTv = true).copy(refreshRateHz = 29.97)),
+        )
+        assertNull(DisplaySelector.displayMaxFrameRate(profile(isTv = true)))
+    }
+
+    @Test
+    fun theEnvelopeRateIsTheTighterOfDecoderClaimAndPanelMode() {
+        val decoderLimited = fourKPanelProfile().copy(avcUhdFrameRate = 30.0, refreshRateHz = 60.0)
+        val panelLimited = fourKPanelProfile().copy(avcUhdFrameRate = 60.0, refreshRateHz = 30.0)
+        assertEquals(30, DisplaySelector.h264Envelope(decoderLimited).maxFrameRateHz)
+        assertEquals(30, DisplaySelector.h264Envelope(panelLimited).maxFrameRateHz)
+        assertEquals(PixelSize(3840, 2160), DisplaySelector.h264Envelope(decoderLimited).pixels)
+    }
+
+    @Test
+    fun theEnvelopeIgnoresAFasterLowerResolutionModeWhenAnnouncingFourK() {
+        // A television that enumerates 1080p60 alongside 4K30 must not be quoted its 60 Hz figure
+        // next to a 4K ceiling: the sender would read that as permission to stream 4K at 60 FPS.
+        val profile = fourKPanelProfile().copy(
+            avcUhdFrameRate = 60.0,
+            refreshRateHz = 60.0,
+            supportedModes = listOf(
+                ModeFact(PixelSize(1920, 1080), 60.0),
+                ModeFact(PixelSize(3840, 2160), 30.0),
+            ),
+        )
+        assertEquals(60, DisplaySelector.displayMaxFrameRate(profile))
+        assertEquals(30, DisplaySelector.h264Envelope(profile).maxFrameRateHz)
+    }
+
+    @Test
+    fun theForcedFourKEnvelopeUsesTheFourKDecoderClaim() {
+        val profile = fullHdModeProfile().copy(
+            avcUhdFrameRate = 30.0,
+            avcMaxFrameRate = 60.0,
+            refreshRateHz = 60.0,
+            supportedModes = listOf(ModeFact(PixelSize(1920, 1080), 60.0)),
+        )
+        assertEquals(PixelSize(1920, 1080), DisplaySelector.h264Envelope(profile).pixels)
+        assertEquals(60, DisplaySelector.h264Envelope(profile).maxFrameRateHz)
+        assertEquals(PixelSize(3840, 2160), DisplaySelector.h264Envelope(profile, forceUhd = true).pixels)
+        assertEquals(30, DisplaySelector.h264Envelope(profile, forceUhd = true).maxFrameRateHz)
+    }
+
+    @Test
+    fun theEnvelopeLeavesTheRateUnstatedWhenNeitherDecoderNorPanelClaimedOne() {
+        val profile = profile(isTv = true)
+        assertEquals(PixelSize(3840, 2160), DisplaySelector.h264Envelope(profile).pixels)
+        assertNull(DisplaySelector.h264Envelope(profile).maxFrameRateHz)
+    }
+
+    private fun fourKPanelProfile() = profile(isTv = true).copy(
+        physicalMode = PixelSize(3840, 2160),
+        decoderMaximum = PixelSize(3840, 2160),
+    )
 
     private fun fullHdModeProfile() = profile(isTv = true).copy(
         physicalMode = PixelSize(1920, 1080),

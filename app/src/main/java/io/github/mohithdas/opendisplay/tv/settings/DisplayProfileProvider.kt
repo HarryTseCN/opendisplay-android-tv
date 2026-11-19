@@ -22,6 +22,7 @@ import io.github.mohithdas.opendisplay.tv.util.Log
 object DisplayProfileProvider {
     private val HD = PixelSize(1280, 720)
     private val FULL_HD = PixelSize(1920, 1080)
+    private val UHD = PixelSize(3840, 2160)
 
     /** Safe during Application and foreground-service startup, before any Activity exists. */
     fun detectServiceSafe(context: Context): DisplayProfile {
@@ -30,19 +31,21 @@ object DisplayProfileProvider {
         val fallback = if (isTelevision(appContext)) FULL_HD else {
             safePixelSize(metrics.widthPixels, metrics.heightPixels) ?: HD
         }
-        val physical = try {
+        val detected: Pair<Display?, PixelSize> = try {
             val manager = appContext.getSystemService(DisplayManager::class.java)
-            modeSize(manager?.getDisplay(Display.DEFAULT_DISPLAY)) ?: fallback
+            val reference = manager?.getDisplay(Display.DEFAULT_DISPLAY)
+            reference to (modeSize(reference) ?: fallback)
         } catch (failure: Exception) {
             Log.warn("physical display detection failed; using ${fallback.width}x${fallback.height}", failure)
-            fallback
+            null to fallback
         }
 
         return profile(
             context = appContext,
-            physical = physical,
-            window = physical,
+            physical = detected.second,
+            window = detected.second,
             density = metrics.density.toDouble(),
+            display = detected.first,
         )
     }
 
@@ -69,6 +72,7 @@ object DisplayProfileProvider {
                 physical = physical,
                 window = window,
                 density = activity.resources.displayMetrics.density.toDouble(),
+                display = display,
             )
         } catch (failure: Exception) {
             Log.warn(
@@ -85,16 +89,21 @@ object DisplayProfileProvider {
         physical: PixelSize,
         window: PixelSize,
         density: Double,
+        display: Display?,
     ): DisplayProfile {
         val capabilities = bestAvcCapabilities()
+        val decoderMaximum = reliableAvcMaximum(physical, capabilities)
         return DisplayProfile(
             physicalMode = physical,
             windowBounds = window,
-            decoderMaximum = reliableAvcMaximum(physical, capabilities),
+            decoderMaximum = decoderMaximum,
             isTelevision = isTelevision(context),
             androidDensity = density.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
             avcHardMaximum = avcHardMaximum(capabilities),
-            avcUhdFrameRate = avcUhdFrameRate(capabilities),
+            avcUhdFrameRate = avcFrameRate(capabilities, UHD),
+            avcMaxFrameRate = avcFrameRate(capabilities, decoderMaximum),
+            refreshRateHz = activeRefreshRate(display),
+            supportedModes = modeFacts(display),
         )
     }
 
@@ -133,22 +142,23 @@ object DisplayProfileProvider {
         return if (width >= 2 && height >= 2) PixelSize(width, height) else null
     }
 
-    private val uhdFrameRateProbe = listOf(60.0, 50.0, 30.0, 25.0, 24.0)
-
-    /** Highest frame rate the decoder claims at 3840x2160, or null when it claims none. */
-    private fun avcUhdFrameRate(capabilities: MediaCodecInfo.VideoCapabilities?): Double? {
+    /**
+     * The rate the H.264 decoder itself claims for one raster.
+     *
+     * `getSupportedFrameRatesFor` throws when the size is outside what the codec supports, which is
+     * the answer to the 4K question rather than a failure to report: no rate at 3840x2160 means this
+     * box cannot decode 4K whatever the panel says. Vendors also occasionally throw for other
+     * reasons, so that distinction is logged rather than guessed at.
+     */
+    private fun avcFrameRate(capabilities: MediaCodecInfo.VideoCapabilities?, size: PixelSize): Double? {
         val caps = capabilities ?: return null
         return try {
-            uhdFrameRateProbe.firstOrNull { rate ->
-                try {
-                    caps.isSizeSupportedForFrameRate(3840, 2160, rate.toFloat())
-                } catch (failure: Exception) {
-                    Log.warn("vendor AVC frame-rate query failed at ${rate}fps", failure)
-                    false
-                }
-            }
+            caps.getSupportedFrameRatesFor(size.width, size.height)?.upper
+        } catch (failure: IllegalArgumentException) {
+            Log.info("AVC decoder supports no frame rate at ${size.width}x${size.height}")
+            null
         } catch (failure: Exception) {
-            Log.warn("AVC 4K frame-rate probe failed", failure)
+            Log.warn("vendor AVC frame-rate query failed at ${size.width}x${size.height}", failure)
             null
         }
     }
@@ -159,6 +169,29 @@ object DisplayProfileProvider {
     } catch (failure: Exception) {
         Log.warn("vendor display mode query failed", failure)
         null
+    }
+
+    private fun activeRefreshRate(display: Display?): Double = try {
+        display?.mode?.refreshRate?.toDouble() ?: 0.0
+    } catch (failure: Exception) {
+        Log.warn("vendor refresh rate query failed", failure)
+        0.0
+    }
+
+    /**
+     * Every mode the display enumerates, with its rate — the list that shows whether a 4K panel is
+     * offered at 60 Hz, only at 30 Hz, or not at all. A firmware that hides the active mode's
+     * siblings leaves a one-entry list, which is still worth showing: it is the difference between
+     * "the box is configured for 1080p output" and "4K never appears here".
+     */
+    private fun modeFacts(display: Display?): List<ModeFact> = try {
+        display?.supportedModes?.mapNotNull { mode ->
+            val pixels = safePixelSize(mode.physicalWidth, mode.physicalHeight)
+            pixels?.let { ModeFact(it, mode.refreshRate.toDouble()) }
+        } ?: emptyList()
+    } catch (failure: Exception) {
+        Log.warn("vendor display mode enumeration failed", failure)
+        emptyList()
     }
 
     private fun isTelevision(context: Context): Boolean = try {

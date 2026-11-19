@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class CursorPosition(val x: Double, val y: Double, val visible: Boolean)
@@ -293,7 +294,8 @@ class PhoneReceiver(
             "display profile: mode ${profile.physicalMode.width}x${profile.physicalMode.height} " +
                 "window ${profile.windowBounds.width}x${profile.windowBounds.height} " +
                 "avcMax ${profile.decoderMaximum.width}x${profile.decoderMaximum.height} " +
-                "hardwareCeiling $hardwareCeiling uhdAt $uhdDecodeRate",
+                "hardwareCeiling $hardwareCeiling uhdAt $uhdDecodeRate " +
+                "refresh ${profile.refreshRateHz}Hz modes ${profile.supportedModes.size}",
         )
         _supportedResolutions.value = DisplaySelector.supportedChoices(
             profile,
@@ -573,11 +575,21 @@ class PhoneReceiver(
         // keep working. A television additionally reports real panel facts, which is how a
         // sender can offer a true 4K HiDPI desktop instead of assuming a 2x backing store and
         // dividing the announced size by two. Handheld receivers are left on the legacy path.
-        // `maxEncodeWide/High` states the decoder ceiling so a sender that honors it captures
-        // 1:1 and scales once on the receiver instead of shipping a stream this device cannot
-        // sustain (PROTOCOL.md 6.5, additive at pv 3 with no bump).
+        // `maxEncodeWide/High` and the matching `videoCaps` h264 entry state the decode ceiling and
+        // the rate it is sustainable at, so a sender that honors them captures 1:1 and scales once
+        // on the receiver instead of shipping a stream this device cannot present — a 4096x2304
+        // decoder behind a 30 Hz panel is a real device, and without the rate it looks like a 60
+        // FPS one (PROTOCOL.md 6.5, additive at pv 3 with no bump). `displayMaxFrameRate` reports
+        // the panel itself, which is a display fact rather than a decoder guarantee.
         if (profile.isTelevision) {
             val facts = DisplaySelector.televisionPanelFacts(profile)
+            val envelope = DisplaySelector.h264Envelope(displayProfile, settings.value.forceUhdResolution)
+            val panelRate = DisplaySelector.displayMaxFrameRate(displayProfile)
+            val caps = JSONObject()
+                .put("codec", "h264")
+                .put("maxWidth", envelope.pixels.width)
+                .put("maxHeight", envelope.pixels.height)
+            envelope.maxFrameRateHz?.let { caps.put("maxFrameRate", it) }
             message.put(
                 "panel",
                 JSONObject()
@@ -586,13 +598,18 @@ class PhoneReceiver(
                     .put("scale", facts.scale)
                     .put("pointsWide", facts.points.width)
                     .put("pointsHigh", facts.points.height),
-            ).put("maxEncodeWide", profile.decoderMaximum.width)
-                .put("maxEncodeHigh", profile.decoderMaximum.height)
+            ).put("maxEncodeWide", envelope.pixels.width)
+                .put("maxEncodeHigh", envelope.pixels.height)
+                .put("videoCaps", JSONArray().put(caps))
+            panelRate?.let { message.put("displayMaxFrameRate", it) }
             val override = if (settings.value.forceUhdResolution) ", 4K override" else ""
+            val capText = envelope.maxFrameRateHz?.let { " cap ${it}fps" } ?: ""
+            val panelText = panelRate?.let { " panel ${it}Hz" } ?: ""
             Log.info(
                 "hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x, " +
                     "panel ${facts.pixels.width}x${facts.pixels.height}@${facts.scale}x " +
-                    "points ${facts.points.width}x${facts.points.height}$override)",
+                    "points ${facts.points.width}x${facts.points.height} " +
+                    "ceiling ${envelope.pixels.width}x${envelope.pixels.height}$capText$panelText$override)",
             )
         } else {
             Log.info("hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x)")
