@@ -49,3 +49,25 @@ internal object NsdRegistrationPolicy {
     fun canRegister(running: Boolean, activeListenerPort: Int?, requestedPort: Int): Boolean =
         running && activeListenerPort == requestedPort
 }
+
+/**
+ * A sender sizes its display from `hello` and starts streaming as soon as the hello lands, so the
+ * opening keyframe frequently arrives while the Activity is still binding the receiver service or
+ * the SurfaceView decoder has not been attached yet. Frames before that point are dropped, and
+ * because a receiver only rebuilds its decoder on a parameter-set change, a missed keyframe would
+ * otherwise leave a black screen until the sender's own periodic IDR — up to a minute away.
+ *
+ * Bounded retries immediately after the hello close that gap without touching the steady-state
+ * path: a stream that starts normally answers the first probe, and every probe is skipped as soon
+ * as SPS/PPS have been seen.
+ */
+internal object StreamStartPolicy {
+    val keyframeRequestDelaysMs = listOf(300L, 1_200L, 3_000L)
+
+    fun shouldRequestKeyframe(
+        attemptGeneration: Int,
+        currentGeneration: Int,
+        connected: Boolean,
+        videoHeadersSeen: Boolean,
+    ): Boolean = attemptGeneration == currentGeneration && connected && !videoHeadersSeen
+}

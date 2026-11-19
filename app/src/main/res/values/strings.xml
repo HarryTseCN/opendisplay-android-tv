@@ -14,6 +14,7 @@
     <string name="address_unavailable">IP address unavailable — check the network connection.</string>
     <string name="resolution">Resolution</string>
     <string name="resolution_auto">Auto / Native</string>
+    <string name="resolution_uhd">3840×2160 (4K)</string>
     <string name="resolution_full_hd">1920×1080</string>
     <string name="resolution_hd">1280×720</string>
     <string name="ui_scale">UI scale</string>

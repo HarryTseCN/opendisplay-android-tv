@@ -22,12 +22,25 @@ data class DisplayProfile(
 
 data class DisplaySelection(val pixels: PixelSize, val scale: Double)
 
+/**
+ * Panel facts for `hello.panel` (PROTOCOL.md 6.7): the physical pixels the panel
+ * lights 1:1, the real backing scale between those pixels and the window this app
+ * draws into, and that window as the desktop the receiver itself runs.
+ *
+ * A 4K television whose Android window is 1080p reports 3840x2160 pixels at scale 2
+ * with a 1920x1080 desktop, so the sender can build a genuinely HiDPI 4K desktop
+ * instead of guessing a factor from the deprecated `hello.scale` it has to ignore.
+ */
+data class PanelFacts(val pixels: PixelSize, val scale: Double, val points: PixelSize)
+
 object DisplaySelector {
+    private val UHD = PixelSize(3840, 2160)
     private val FULL_HD = PixelSize(1920, 1080)
     private val HD = PixelSize(1280, 720)
 
     fun supportedChoices(profile: DisplayProfile): List<ResolutionChoice> = buildList {
         add(ResolutionChoice.AUTO)
+        if (supports(UHD, profile)) add(ResolutionChoice.UHD)
         if (supports(FULL_HD, profile)) add(ResolutionChoice.FULL_HD)
         if (supports(HD, profile)) add(ResolutionChoice.HD)
     }
@@ -39,6 +52,7 @@ object DisplaySelector {
     ): DisplaySelection {
         val requested = when (resolution) {
             ResolutionChoice.AUTO -> automaticSize(profile)
+            ResolutionChoice.UHD -> oriented(UHD, profile.windowBounds)
             ResolutionChoice.FULL_HD -> oriented(FULL_HD, profile.windowBounds)
             ResolutionChoice.HD -> oriented(HD, profile.windowBounds)
         }
@@ -51,10 +65,29 @@ object DisplaySelector {
         return DisplaySelection(safe.even(), scale)
     }
 
+    /**
+     * Television panel facts only. Handheld receivers keep the deprecated
+     * `hello.pixelsWide/High` path until their density-to-backing-scale mapping
+     * has been measured on real hardware.
+     */
+    fun televisionPanelFacts(profile: DisplayProfile): PanelFacts {
+        val points = profile.windowBounds
+        val pixels = oriented(profile.physicalMode, points)
+        return PanelFacts(pixels, backingScale(pixels, points), points)
+    }
+
+    private fun backingScale(pixels: PixelSize, points: PixelSize): Double {
+        val ratio = pixels.longEdge.toDouble() / points.longEdge
+        val bounded = if (ratio.isFinite() && ratio >= 1.0) ratio.coerceAtMost(4.0) else 1.0
+        return (bounded * 100).roundToInt() / 100.0
+    }
+
     private fun automaticSize(profile: DisplayProfile): PixelSize {
         val native = if (profile.isTelevision) profile.physicalMode else profile.windowBounds
-        // 4K is deliberately opt-out for this first TV release: inexpensive sticks commonly
-        // expose a 4K HDMI mode while only sustaining low-latency AVC reliably at 1080p.
+        // Auto stays conservative for televisions: inexpensive sticks commonly expose a 4K HDMI
+        // mode while only sustaining low-latency AVC reliably at 1080p. 4K is now available as an
+        // explicit ResolutionChoice.UHD selection, offered only when the panel and the reported
+        // AVC ceiling both support it, so nothing changes for anyone who leaves Auto alone.
         return if (profile.isTelevision && native.longEdge > FULL_HD.longEdge) {
             oriented(FULL_HD, native)
         } else {

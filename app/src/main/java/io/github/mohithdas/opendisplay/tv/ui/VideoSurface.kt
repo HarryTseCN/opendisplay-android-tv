@@ -89,6 +89,10 @@ fun VideoSurface(
                             onSizeChanged = { w, h -> onDimsChanged(VideoDims(w, h)) },
                             onError = { currentReceiver.requestKeyframe() },
                         )
+                        // A peer that connected before this surface existed streamed an IDR that had
+                        // nowhere to go. Ask for a fresh one so the picture appears immediately
+                        // instead of waiting for the sender's own periodic keyframe.
+                        if (currentConnected) currentReceiver.requestKeyframe()
                     }
 
                     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}

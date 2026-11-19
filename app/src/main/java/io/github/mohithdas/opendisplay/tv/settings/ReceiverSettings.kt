@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class ResolutionChoice { AUTO, FULL_HD, HD }
+enum class ResolutionChoice { AUTO, UHD, FULL_HD, HD }
 
 enum class UiScaleChoice { AUTO, ONE, TWO }
 

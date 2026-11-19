@@ -139,7 +139,7 @@ class PhoneReceiver(
     private val sendLock = Any()
     private val preferences = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private var displayProfile = startupDisplayProfile
+    @Volatile private var displayProfile = startupDisplayProfile
         ?: DisplayProfileProvider.detectServiceSafe(appContext)
     private val settingsRepository = ReceiverSettingsRepository(
         SharedPreferencesStorage(preferences),
@@ -166,6 +166,8 @@ class PhoneReceiver(
     private var nsdRetryAttempt = 0
 
     @Volatile private var lastDataReceivedAt = System.currentTimeMillis()
+    @Volatile private var videoHeadersSeen = false
+    @Volatile private var streamStartGeneration = 0
 
     private val _listenerState = MutableStateFlow(ListenerState(ListenerPhase.STARTING))
     val listenerState: StateFlow<ListenerState> = _listenerState.asStateFlow()
@@ -397,9 +399,31 @@ class PhoneReceiver(
         socket = client
         outputStream = client.getOutputStream()
         lastDataReceivedAt = System.currentTimeMillis()
+        videoHeadersSeen = false
         _connected.value = true
         sendHello()
+        scheduleStreamStartKeyframes(++streamStartGeneration)
         readJob = scope.launch { readLoop(client) }
+    }
+
+    /** Probes for an IDR until the stream's parameter sets arrive; see [StreamStartPolicy]. */
+    private fun scheduleStreamStartKeyframes(generation: Int) {
+        scope.launch {
+            StreamStartPolicy.keyframeRequestDelaysMs.forEach { delayMs ->
+                delay(delayMs)
+                if (!StreamStartPolicy.shouldRequestKeyframe(
+                        generation,
+                        streamStartGeneration,
+                        _connected.value,
+                        videoHeadersSeen,
+                    )
+                ) {
+                    return@launch
+                }
+                Log.info("no video headers ${delayMs}ms after hello; requesting a keyframe")
+                requestKeyframe()
+            }
+        }
     }
 
     private fun readLoop(client: Socket) {
@@ -428,6 +452,7 @@ class PhoneReceiver(
                 outputStream = null
                 _connected.value = false
                 _decoderResolution.value = null
+                videoHeadersSeen = false
             }
             try {
                 client.close()
@@ -441,6 +466,7 @@ class PhoneReceiver(
         socket = null
         outputStream = null
         _connected.value = false
+        videoHeadersSeen = false
         try {
             client.close()
         } catch (_: IOException) {
@@ -463,6 +489,7 @@ class PhoneReceiver(
         }
         val parsed = AnnexB.parse(frame)
         if (parsed.vclNalus.isEmpty() && parsed.sps == null && parsed.pps == null) return
+        if (parsed.sps != null && parsed.pps != null) videoHeadersSeen = true
         val telemetry = AnnexB.parseTelemetry(parsed.telemetryPrefix)
         _videoFrames.tryEmit(
             VideoFrame(parsed.sps, parsed.pps, parsed.vclNalus, telemetry.captureMs, telemetry.sendMs),
@@ -503,16 +530,43 @@ class PhoneReceiver(
 
     private fun sendHello() {
         val selection = _displaySelection.value
+        val profile = displayProfile
         val message = JSONObject()
             .put("type", WireMessage.HELLO)
             .put("pixelsWide", selection.pixels.width)
             .put("pixelsHigh", selection.pixels.height)
             .put("scale", selection.scale)
-            .put("device", if (displayProfile.isTelevision) "Android TV" else "Android")
+            .put("device", if (profile.isTelevision) "Android TV" else "Android")
             .put("id", installId)
             .put("pv", WireProtocol.VERSION)
+        // The deprecated `pixelsWide/High` pair above stays exactly as before so older senders
+        // keep working. A television additionally reports real panel facts, which is how a
+        // sender can offer a true 4K HiDPI desktop instead of assuming a 2x backing store and
+        // dividing the announced size by two. Handheld receivers are left on the legacy path.
+        // `maxEncodeWide/High` states the decoder ceiling so a sender that honors it captures
+        // 1:1 and scales once on the receiver instead of shipping a stream this device cannot
+        // sustain (PROTOCOL.md 6.5, additive at pv 3 with no bump).
+        if (profile.isTelevision) {
+            val facts = DisplaySelector.televisionPanelFacts(profile)
+            message.put(
+                "panel",
+                JSONObject()
+                    .put("pixelsWide", facts.pixels.width)
+                    .put("pixelsHigh", facts.pixels.height)
+                    .put("scale", facts.scale)
+                    .put("pointsWide", facts.points.width)
+                    .put("pointsHigh", facts.points.height),
+            ).put("maxEncodeWide", profile.decoderMaximum.width)
+                .put("maxEncodeHigh", profile.decoderMaximum.height)
+            Log.info(
+                "hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x, " +
+                    "panel ${facts.pixels.width}x${facts.pixels.height}@${facts.scale}x " +
+                    "points ${facts.points.width}x${facts.points.height})",
+            )
+        } else {
+            Log.info("hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x)")
+        }
         sendControl(message)
-        Log.info("hello sent (${selection.pixels.width}x${selection.pixels.height} @${selection.scale}x)")
     }
 
     private fun handleControlJson(payload: ByteArray) {

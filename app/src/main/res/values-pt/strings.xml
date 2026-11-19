@@ -14,6 +14,7 @@
     <string name="address_unavailable">Endereço IP indisponível — verifique a rede.</string>
     <string name="resolution">Resolução</string>
     <string name="resolution_auto">Automática / Nativa</string>
+    <string name="resolution_uhd">3840×2160 (4K)</string>
     <string name="resolution_full_hd">1920×1080</string>
     <string name="resolution_hd">1280×720</string>
     <string name="ui_scale">Escala da interface</string>

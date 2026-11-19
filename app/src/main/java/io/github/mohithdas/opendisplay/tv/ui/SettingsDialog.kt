@@ -272,6 +272,7 @@ private fun <T> nextValue(current: T, values: List<T>): T {
 private fun resolutionLabel(value: ResolutionChoice): String = stringResource(
     when (value) {
         ResolutionChoice.AUTO -> R.string.resolution_auto
+        ResolutionChoice.UHD -> R.string.resolution_uhd
         ResolutionChoice.FULL_HD -> R.string.resolution_full_hd
         ResolutionChoice.HD -> R.string.resolution_hd
     },
